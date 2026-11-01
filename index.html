@@ -293,8 +293,8 @@ function nextAlive(from,step){const n=G.ps.length;for(let k=1;k<=n;k++){const j=
 function snap(){return JSON.stringify({turn:G.turn,ps:G.ps.map(p=>({hp:p.hp,sh:p.sh,atk:p.atk,umb:p.umb,x:p.x,y:p.y,f:p.f,hand:p.hand,alive:p.alive,turns:p.turns||0,ap:p.ap||0,apMax:p.apMax||S().ap,boost:p.boost||0,draws:p.draws||0}))})}
 function restore(i,s){const d=JSON.parse(s);const q=d.ps[i],p=G.ps[i];Object.assign(p,q);return d}
 function startTurn(r=true){const cp=G.ps[G.turn];G.hist.push(snap());if(G.hist.length>6)G.hist.shift();
- // コスト増加回数・残りコストをプレイヤーごとに個別管理する。
- cp.turns=(cp.turns||0)+1;cp.apMax=S().ap;let ap=Math.min(S().ap,(cp.turns-1)*S().apInc);if(cp.f[cp.y*5+cp.x].c==='y')ap++;
+ // 各プレイヤーの残りコストを保持し、その人の次のターン開始時だけ増加させる。
+ cp.turns=(cp.turns||0)+1;cp.apMax=S().ap;let ap=Math.max(0,Number(cp.ap)||0);if(cp.turns>1)ap=Math.min(S().ap,ap+S().apInc);if(cp.f[cp.y*5+cp.x].c==='y')ap++;
  if(G.snow.lvl>0){if(!umbBlock(cp))ap=Math.max(0,ap-G.snow.lvl);if(ap<=0&&!cp.hand.includes('umbrella')){hurt(cp,1,'島雪');ap=0}}
  if(cp.boost>0){cp.boost--;ap=810;cp.apMax=810;hurt(cp,1,'コスト増強810',1)}
  cp.ap=ap;G.ap=cp.ap;G.apMax=cp.apMax;cp.draws=0;G.card=null;G.cpuT=performance.now()+900;G.log=`${G.ps[G.turn].name} のターン`;if(cp.sleep>0){cp.sleep--;G.log=cp.name+'は眠っている…';checkEnd();if(!G.over)endTurn();return}if(r)paintBattle()}
@@ -303,17 +303,17 @@ function endTurn(){if(G.over)return;if(G.smell>0){G.smell--;G.ps.forEach(q=>{if(
 function enemyOf(i){return G.target!==i&&G.ps[G.target]&&G.ps[G.target].alive?G.target:nextAlive(i,1)}
 function playCard(i,k,tile){ // i player, k card key, tile {pi,ti}
  const p=G.ps[i],c=CARDS[k];if(G.over||G.turn!==i)return false;
- let cost=c.c;if(k==='draw')cost=p.draws>0?S().drawCost:0;if(k==='rewind'&&G.over)return false;if(cost>G.ap)return false;
+ let cost=c.c;if(k==='draw')cost=p.draws>0?S().drawCost:0;if(k==='rewind'&&G.over)return false;if(cost>(Number(p.ap)||0))return false;
  const here=p.f[p.y*5+p.x].c;
  if(k==='end'){endTurn();return true}
- if(k==='draw'){if(p.hand.length<S().maxHand+4)p.hand.push(rc());p.draws++;G.ap-=cost;p.ap=G.ap;return true}
+ if(k==='draw'){if(p.hand.length<S().maxHand+4)p.hand.push(rc());p.draws++;p.ap=Math.max(0,(Number(p.ap)||0)-cost);if(i===G.turn)G.ap=p.ap;return true}
  if(c.passive)return false;
- if(FX(i,k,c,cost)){const active=G.ps[G.turn];if(active)active.ap=G.ap;return true;}
+ if(FX(i,k,c,cost)){if(i===G.turn)G.ap=p.ap;return true;}
  if(c.tile){if(!tile)return false;const t=G.ps[tile.pi].f[tile.ti];if(k==='crush')t.d=Math.max(0,t.d-2);else t.c={w:'r',r:'b',b:'g',g:'r'}[t.c];}
  if(k==='fire'){const t=G.ps[enemyOf(i)];let d=2+p.atk+(here==='g'?1:0);const ab=Math.min(t.sh,d);t.sh-=ab;t.hp-=d-ab;G.log=`${p.name} → ${t.name} に${d}ダメージ`;if(t.hp<=0){t.hp=0;t.alive=false}}
  if(k==='heal')p.hp=Math.min(p.mhp,p.hp+2+(here==='r'?1:0));
  if(k==='guard')p.sh+=2+(here==='b'?1:0);
- G.ap-=cost;p.ap=G.ap;const ix=p.hand.indexOf(k);if(ix>=0)p.hand.splice(ix,1);
+ p.ap=Math.max(0,(Number(p.ap)||0)-cost);if(i===G.turn)G.ap=p.ap;const ix=p.hand.indexOf(k);if(ix>=0)p.hand.splice(ix,1);
  checkEnd();return true}
 function umbBlock(t){if(t.hand.includes('umbrella')){if(--t.umb<=0){t.hand.splice(t.hand.indexOf('umbrella'),1);t.umb=3}G.log=t.name+'の傘が無効化';return true}return false}
 function hurt(t,d,why,unav){if(!t.alive)return;if(!unav&&umbBlock(t))return;const ab=Math.min(t.sh,d);t.sh-=ab;t.hp-=d-ab;G.log=`${why}: ${t.name}に${d}ダメージ`;if(t.hp<=0){t.hp=0;t.alive=false}}
@@ -327,12 +327,12 @@ function FX(i,k,c,cost){const p=G.ps[i];let used=true;
  else if(c.paint){const w=p.f.map((t,j)=>t.c==='w'&&t.d>0?j:-1).filter(j=>j>=0);if(!w.length)return false;p.f[w[rnd(w.length)]].c=c.paint}
 
  else if(k==='taishu'){G.smell=3;G.log='体臭が漂う…'}
- else if(k==='ippuku'){p.hp=Math.min(p.mhp,p.hp+3);G.ap-=cost;const ix=p.hand.indexOf(k);if(ix>=0)p.hand.splice(ix,1);p.hand.push('ippuku');return true}
+ else if(k==='ippuku'){p.hp=Math.min(p.mhp,p.hp+3);p.ap=Math.max(0,(Number(p.ap)||0)-cost);if(i===G.turn)G.ap=p.ap;const ix=p.hand.indexOf(k);if(ix>=0)p.hand.splice(ix,1);p.hand.push('ippuku');return true}
  else if(k==='bougai'){G.ps.forEach(q=>{if(q.alive&&q.hand.length){const j=rnd(q.hand.length);const x=q.hand[j];if(x===k&&q.hand.filter(y=>y===k).length===1&&q===p&&q.hand.length>1)return;q.hand.splice(j,1)}});G.log='全員の手札が1枚消えた'}
  else if(k==='impostor'){const r=p.f.filter(q=>q.c==='r').length,d=Math.max(0,r-1);if(d)hurt(p,d,'インポスター');p.atk+=d+1;add(p,'bougai');G.log=`インポスター: 攻撃力+${d+1}`}
- else if(k==='crew'){p.hp=Math.min(p.mhp,p.hp+1);G.ap+=2}
- else if(k==='mystery'){const o=Object.keys(CARDS).filter(x=>!['mystery','senpai'].includes(x)&&!CARDS[x].passive&&!CARDS[x].tile&&!CARDS[x].paint&&!CARDS[x].fixed&&x!=='rewind'&&x!=='steve');let ok=false;for(let n=0;n<12&&!ok;n++){const x=o[rnd(o.length)];p.hand.push(x);const b=G.ap;ok=FX(i,x,CARDS[x],0);if(!ok){const j=p.hand.lastIndexOf(x);if(j>=0)p.hand.splice(j,1)}else G.log='?→'+CARDS[x].n}}
- else if(k==='cost810'){p.boost=3;G.ap+=810;G.log='コスト810!'}
+ else if(k==='crew'){p.hp=Math.min(p.mhp,p.hp+1);p.ap=(Number(p.ap)||0)+2;if(i===G.turn)G.ap=p.ap}
+ else if(k==='mystery'){const o=Object.keys(CARDS).filter(x=>!['mystery','senpai'].includes(x)&&!CARDS[x].passive&&!CARDS[x].tile&&!CARDS[x].paint&&!CARDS[x].fixed&&x!=='rewind'&&x!=='steve');let ok=false;for(let n=0;n<12&&!ok;n++){const x=o[rnd(o.length)];p.hand.push(x);ok=FX(i,x,CARDS[x],0);if(!ok){const j=p.hand.lastIndexOf(x);if(j>=0)p.hand.splice(j,1)}else G.log='?→'+CARDS[x].n}}
+ else if(k==='cost810'){p.boost=3;p.ap=(Number(p.ap)||0)+810;if(i===G.turn)G.ap=p.ap;G.log='コスト810!'}
  else if(k==='senpai'){const n=d10();G.log='810先輩: '+n;if(n===10){const f=foes(i);if(f.length)hurt(f[rnd(f.length)],114514,'810先輩',1)}else{const t=G.ps[enemyOf(i)];if(t&&t!==p)t.sleep=(t.sleep||0)+n}}
  else if(k==='dencha'){G.ps.forEach(q=>hurt(q,5,'デンチャ',1))}
  else if(k==='gobou'){const g=p.f.filter(q=>q.c==='g').length;p.mhp+=g;G.log=`最大体力+${g}`}
@@ -351,10 +351,10 @@ function FX(i,k,c,cost){const p=G.ps[i];let used=true;
  else if(k==='rifle'){p.atk+=3;G.log='攻撃力+3'}
  else if(k==='grox'){const n=d10();p.atk+=n;const f=foes(i);if(f.length)hurt(f[rnd(f.length)],2+p.atk,'grox(避けられない弾)',1);G.log+=` 攻撃力+${n}`}
  else if(k==='steve'){const h=p.hand.indexOf('head');if(h<0){G.log='謎の頭が手札にない';return false}p.hand.splice(h,1);add(p,'grox')}
- else if(k==='rewind'){if(G.hist.length<2){G.log='戻れるターンがない';return false}const s=G.hist[G.hist.length-2];G.hist.length=G.hist.length-1;const d=JSON.parse(s);d.ps.forEach((q,j)=>Object.assign(G.ps[j],q));G.turn=d.turn;G.ap=G.ps[G.turn]?.ap??S().ap;G.apMax=G.ps[G.turn]?.apMax??S().ap;G.log='1ターン巻き戻した';return true}
+ else if(k==='rewind'){if(G.hist.length<2){G.log='戻れるターンがない';return false}const s=G.hist[G.hist.length-2];G.hist.length=G.hist.length-1;const d=JSON.parse(s);d.ps.forEach((q,j)=>Object.assign(G.ps[j],q));G.turn=d.turn;G.ap=G.ps[G.turn]?.ap??0;G.apMax=G.ps[G.turn]?.apMax??S().ap;G.log='1ターン巻き戻した';return true}
  else used=false;
  if(!used)return false;
- G.ap-=cost;const ix=p.hand.indexOf(k);if(ix>=0)p.hand.splice(ix,1);checkEnd();return true}
+ p.ap=Math.max(0,(Number(p.ap)||0)-cost);if(i===G.turn)G.ap=p.ap;const ix=p.hand.indexOf(k);if(ix>=0)p.hand.splice(ix,1);checkEnd();return true}
 function checkEnd(){
  G.ps.forEach(p=>{if(p.alive&&p.f[p.y*5+p.x].d<=0){p.alive=false;p.hp=0;G.log=p.name+'は足場が壊れて落下!'}});
  G.ps.forEach((p,i)=>{if(!p.alive&&p.hand.includes('rewind')&&G.hist.length){const s=G.hist[Math.max(0,G.hist.length-1-(1+rnd(2)))];const d=JSON.parse(s);Object.assign(p,d.ps[i]);p.hand.splice(p.hand.indexOf('rewind'),1);p.alive=true;if(p.hp<=0)p.hp=p.mhp;G.log=p.name+'は逆戻りで復活!'}});const alive=G.ps.filter(p=>p.alive);if(ONL?alive.length<=1:(!G.ps[0].alive||alive.length===1))G.over=true}
@@ -370,24 +370,24 @@ function tick(){if(!G||G.over)return;const now=performance.now();resolveInc();
  G.ps.forEach((p,i)=>{if(!ONL&&i&&p.alive&&now-p.lastMove>400+i*130&&Math.random()<.2){const d=[[1,0],[-1,0],[0,1],[0,-1]][Math.floor(Math.random()*4)];move(i,d[0],d[1])}});
  const t=G.ps[G.turn];if(!t.human&&now>G.cpuT){G.cpuT=now+[1600,900,400][CPULV-1];if(CPULV===1&&Math.random()<.4)endTurn();else cpuAct(G.turn)}}
 function cpuAct(i){const p=G.ps[i];const has=k=>p.hand.includes(k);
- if(has('heal')&&p.hp<=7&&G.ap>=2)return playCard(i,'heal'),paintBattle();
- if(has('fire')&&G.ap>=2)return playCard(i,'fire'),paintBattle();
- if(has('guard')&&G.ap>=1&&p.sh<2)return playCard(i,'guard'),paintBattle();
- if(has('crush')&&G.ap>=2){const e=G.ps[enemyOf(i)];playCard(i,'crush',{pi:G.ps.indexOf(e),ti:e.y*5+e.x});return paintBattle()}
- {const o=p.hand.filter(k=>!CARDS[k].passive&&!CARDS[k].tile&&!['fire','heal','guard','draw','end','rewind'].includes(k)&&CARDS[k].c<=G.ap);if(o.length&&Math.random()<.9){const k=o[rnd(o.length)];if(playCard(i,k)){return paintBattle()}else{p.hand.splice(p.hand.indexOf(k),1)}}}
- if(p.draws<2&&G.ap>=1&&p.hand.length<S().maxHand){playCard(i,'draw');return paintBattle()}
+ if(has('heal')&&p.hp<=7&&(Number(p.ap)||0)>=2)return playCard(i,'heal'),paintBattle();
+ if(has('fire')&&(Number(p.ap)||0)>=2)return playCard(i,'fire'),paintBattle();
+ if(has('guard')&&(Number(p.ap)||0)>=1&&p.sh<2)return playCard(i,'guard'),paintBattle();
+ if(has('crush')&&(Number(p.ap)||0)>=2){const e=G.ps[enemyOf(i)];playCard(i,'crush',{pi:G.ps.indexOf(e),ti:e.y*5+e.x});return paintBattle()}
+ {const o=p.hand.filter(k=>!CARDS[k].passive&&!CARDS[k].tile&&!['fire','heal','guard','draw','end','rewind'].includes(k)&&CARDS[k].c<=(Number(p.ap)||0));if(o.length&&Math.random()<.9){const k=o[rnd(o.length)];if(playCard(i,k)){return paintBattle()}else{p.hand.splice(p.hand.indexOf(k),1)}}}
+ if(p.draws<2&&(Number(p.ap)||0)>=1&&p.hand.length<S().maxHand){playCard(i,'draw');return paintBattle()}
  endTurn()}
 function paintBattle(){const el=$('#bboard');if(!el||!G)return;if(ONL&&HOST)pushSoon();
  const you=G.ps[SEAT];finish();
- const handKey=JSON.stringify([you.hand,G.card,you.draws,G.ap]);const oldHand=el.querySelector('.hand');const keepHand=oldHand&&el.dataset.handKey===handKey?oldHand:null;
- el.innerHTML=`<div class="panel row"><b>ターン: ${esc(G.ps[G.turn].name)}</b><span>⚡コスト ${G.ap}/${G.apMax||S().ap}${G.snow.lvl?' ❄️':''}</span><span>${esc(G.log)}</span><span style="flex:1"></span><small>移動: 矢印/WASD(0.25秒に1マス・いつでも可)。攻撃対象は相手の枠をクリック</small></div>
+ const handKey=JSON.stringify([you.hand,G.card,you.draws,you.ap]);const oldHand=el.querySelector('.hand');const keepHand=oldHand&&el.dataset.handKey===handKey?oldHand:null;
+ el.innerHTML=`<div class="panel row"><b>ターン: ${esc(G.ps[G.turn].name)}</b><span>⚡自分のコスト ${Number(you.ap)||0}/${you.apMax||S().ap}${G.snow.lvl?' ❄️':''}</span><span>${esc(G.log)}</span><span style="flex:1"></span><small>移動: 矢印/WASD(0.25秒に1マス・いつでも可)。攻撃対象は相手の枠をクリック</small></div>
  <div class="boards">${G.ps.map((p,i)=>`<div class="pf ${G.turn===i?'turn':''} ${G.target===i&&i!==SEAT?'sel':''} ${p.alive?'':'dead'}"><div class="row" ${i!==SEAT?`onclick="G.target=${i};paintBattle()"`:''}>${avatar(p.u)}<b>${esc(p.name)}</b> <span class="hp">♥ ${p.hp}/${p.mhp}</span> 🛡${p.sh} <small>(${POS[i]})</small></div><div class="grid">${p.f.map((t,ti)=>`<button class="t ${t.c} d${t.d}" onclick="tileClick(${i},${ti})">${p.x+p.y*5===ti&&p.alive?`<span>${i!==SEAT?'🙂':'😀'}</span>`:''}<small>${t.d}</small></button>`).join('')}${(G.inc||[]).filter(m=>m.t===i).map(m=>{const x=(m.ti%5)*20+10,y=Math.floor(m.ti/5)*20+10;return `<div class="projectile-layer"><span class="projectile ${m.kind==='barrage'?'barrage':''}" style="--tx:${x}%;--ty:${y}%">${m.kind==='barrage'?'🔥':'🚀'}</span></div>`}).join('')}</div></div>`).join('')}</div>
  <div class="panel"><div class="hand">${you.hand.map((k,hi)=>cardHtml(k,hi)).join('')}${cardHtml('draw')}${cardHtml('end')}</div>${G.over&&G.res?`<div class="resov"><div class="resbox ${G.res.win?'win':'lose'}"><h1>${G.res.win?'🎉 勝利!':'💀 敗北…'}</h1><p class="xpl">獲得XP <b>+${G.res.xp}</b>${G.res.up?` ・ レベルアップ! Lv.${G.res.lv}`:''}</p>${G.res.win?`<p>連勝 ${G.res.st}</p>`:''}<button onclick="leaveNet();go('home')">ホームへ</button>${ONL?'':(STORY&&G.res.win&&STORY<20?` <button onclick="startStory(${STORY+1})">次の節へ</button>`:` <button onclick="STORY?startStory(${STORY}):startBattle(${G.ps.length-1})">もう一度</button>`)}</div></div>`:''}</div>`;
  if(keepHand){const fresh=el.querySelector('.hand');if(fresh)fresh.replaceWith(keepHand)}el.dataset.handKey=handKey}
-function cardHtml(k,hi){const c=CARDS[k],cost=k==='draw'?(G.ps[SEAT].draws>0?1:0):c.c;if(c.img)return `<div class="card imgc ${G.card===k&&!c.fixed?'sel':''}" title="${esc(c.n+': '+c.d)}" onclick="cardClick('${k}')"><span class="c">${cost}</span><img src="${c.img}" alt="${esc(c.n)}"></div>`;return `<div class="card ${G.card===k&&!c.fixed?'sel':''}" style="border-color:${c.col}" onclick="cardClick('${k}')"><span class="c">${cost}</span><div class="i">${esc(c.i)}</div><b>${esc(c.n)}</b><p>${esc(c.d)}</p></div>`}
+function cardHtml(k,hi){const c=CARDS[k],cost=k==='draw'?(G.ps[SEAT].draws>0?S().drawCost:0):c.c;if(c.img)return `<div class="card imgc ${G.card===k&&!c.fixed?'sel':''}" title="${esc(c.n+': '+c.d)}" onclick="cardClick('${k}')"><span class="c">${cost}</span><img src="${c.img}" alt="${esc(c.n)}"></div>`;return `<div class="card ${G.card===k&&!c.fixed?'sel':''}" style="border-color:${c.col}" onclick="cardClick('${k}')"><span class="c">${cost}</span><div class="i">${esc(c.i)}</div><b>${esc(c.n)}</b><p>${esc(c.d)}</p></div>`}
 function cardFace(k){const c=CARDS[k];return c.img?`<img src="${c.img}" alt="${esc(c.n)}" style="width:100%;border-radius:6px">`:`<div class="card" style="border-color:${c.col};width:auto"><span class="c">${c.c}</span><div class="i">${c.i}</div><b>${esc(c.n)}</b></div>`}
 function cardListHtml(){return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">${Object.keys(CARDS).filter(k=>!CARDS[k].fixed).map(k=>{const c=CARDS[k];return `<div class="panel">${cardFace(k)}<p><b>${esc(c.n)}</b> コスト${c.c}</p><p style="font-size:13px">${esc(c.d)}</p></div>`}).join('')}</div>`}
-function cardClick(k){if(!G||G.over)return;if(G.turn!==SEAT){G.log='カードは自分のターンに使えません';paintBattle();return}const c=CARDS[k];if(!c)return;if(c.tile){if(c.c>G.ap){G.log='コストが足りません';paintBattle();return}G.card=G.card===k?null:k;G.log=G.card?'対象の地面をクリック':'';return paintBattle()}const ok=perform({k});if(ok===false){G.log='カードを使用できません(コスト・効果・ターンを確認)'}paintBattle()}
+function cardClick(k){if(!G||G.over)return;if(G.turn!==SEAT){G.log='カードは自分のターンに使えません';paintBattle();return}const c=CARDS[k];if(!c)return;if(c.tile){if(c.c>(Number(G.ps[SEAT].ap)||0)){G.log='コストが足りません';paintBattle();return}G.card=G.card===k?null:k;G.log=G.card?'対象の地面をクリック':'';return paintBattle()}const ok=perform({k});if(ok===false){G.log='カードを使用できません(コスト・効果・ターンを確認)'}paintBattle()}
 function tileClick(pi,ti){if(!G||G.over)return;if(G.card&&G.turn===SEAT){const k=G.card;const ok=perform({k,tile:{pi,ti}});if(ok===false){G.log='カードを使用できません(対象またはコストを確認)';paintBattle();return}G.card=null;G.log=CARDS[k].n;paintBattle();return}
  if(pi===SEAT){const p=G.ps[SEAT];const dx=(ti%5)-p.x,dy=Math.floor(ti/5)-p.y;if(Math.abs(dx)+Math.abs(dy)===1)perform({mv:[dx,dy]})}else{G.target=pi;paintBattle()}}
 addEventListener('keydown',e=>{const k=e.key.length>1?e.key:e.key.toLowerCase();if(screen==='battle'&&document.activeElement.tagName!=='INPUT'){G.keys[k]=1;if(k.startsWith('Arrow'))e.preventDefault()}});
